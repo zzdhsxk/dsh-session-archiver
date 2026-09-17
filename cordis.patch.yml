@@ -1,0 +1,5 @@
+# dsh-session-archiver bundle 层：插入插件行。
+- insert:
+    - id: dsh-session-archiver
+      name: 'dsh-session-archiver'
+      config: {}
