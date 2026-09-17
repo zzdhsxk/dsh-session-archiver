@@ -72,22 +72,37 @@ dsh 的会话文件（`session.v3.jsonl.zstd`）在打开/保存时，由**主�
 
 ## 安装
 
+### 一行命令（推荐）
+
 ```bash
-# 1) 获取代码
-git clone https://github.com/zzdhsxk/dsh-session-archiver.git ~/dsh_workspace/plugins/dsh-session-archiver
+dsh plugin --profile web add github:zzdhsxk/dsh-session-archiver
+```
 
-# 2) 在 dsh web profile 的 package.json 中登记（link: 便于开发时改动即时生效）
-#    "dependencies": { "dsh-session-archiver": "link:/Users/you/dsh_workspace/plugins/dsh-session-archiver" }
-#    并在 "dsh.profile.bundles" 数组里追加 "dsh-session-archiver"
+这条命令会：在 profile 目录执行 `pnpm add`，并**自动把声明了 `dsh.bundle` 的依赖同步进 `dsh.profile.bundles`** —— 这是 dsh 官方 `plugin` 子命令的行为（源码注释：*run `pnpm <args...>` in the profile directory, then reconcile the `dsh.profile.bundles` layer list against the installed state*），**无需手动改 package.json**。
 
-# 3) 安装依赖
-cd ~/.dsh/profiles/web && pnpm install
+装好后重启 dsh web，侧栏底部即出现「会话仓库」：
 
-# 4) 重启 dsh web（由你自行决定时机）
+```bash
 dsh-daemon restart
 ```
 
-安装后在侧栏底部即可看到「会话仓库」。
+> 若包来自 git 且带 `prepare` 脚本，pnpm 会拦截构建并打印一个 key，按提示把它加到 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 下再重跑即可。本插件是纯 JS、无构建步骤，通常不会遇到。
+
+### 手动方式（适合本地开发，改代码即时生效）
+
+```bash
+git clone https://github.com/zzdhsxk/dsh-session-archiver.git ~/dsh_workspace/plugins/dsh-session-archiver
+```
+
+然后在 `~/.dsh/profiles/web/package.json` 里：
+
+- `dependencies` 加 `"dsh-session-archiver": "link:/绝对路径/dsh-session-archiver"`
+- `dsh.profile.bundles` 数组里加 `"dsh-session-archiver"`
+
+```bash
+cd ~/.dsh/profiles/web && pnpm install
+dsh-daemon restart
+```
 
 ## HTTP API
 
