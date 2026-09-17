@@ -70,25 +70,106 @@ dsh 的会话文件（`session.v3.jsonl.zstd`）在打开/保存时，由**主�
 
 面板上另有 **「立即执行一次」** 按钮可手工触发并查看结果；也可直接调 API。
 
-## 安装
 
-### 一行命令（推荐）
+## 安装与运行（macOS / Linux / Windows）
+
+### 1. dsh 本体（三平台一致）
+
+需要 Node.js 22+：
+
+```bash
+npm i -g @deepseek-ai/dsh
+dsh --version
+```
+
+### 2. 装这个插件（三平台一致）
 
 ```bash
 dsh plugin --profile web add github:zzdhsxk/dsh-session-archiver
 ```
 
-这条命令会：在 profile 目录执行 `pnpm add`，并**自动把声明了 `dsh.bundle` 的依赖同步进 `dsh.profile.bundles`** —— 这是 dsh 官方 `plugin` 子命令的行为（源码注释：*run `pnpm <args...>` in the profile directory, then reconcile the `dsh.profile.bundles` layer list against the installed state*），**无需手动改 package.json**。
+该命令在 profile 目录里执行 `pnpm add`，并自动把声明了 `dsh.bundle` 的依赖同步进 `dsh.profile.bundles`。
 
-装好后重启 dsh web，侧栏底部即出现「会话仓库」：
+### 3. 启动与守护（三平台同一组命令）
 
 ```bash
-dsh-daemon restart
+dsh-daemon install      # 注册开机自启 + 每 30s 探活自愈（macOS→LaunchAgent，Linux→systemd user，Windows→VBS + 任务计划）
+dsh-daemon status       # 守护与 web 健康状态
+dsh-daemon restart      # 重启 web 让新插件生效（会中断当前会话，先确认没在跑任务）
+dsh-daemon stop         # 暂停守护并停掉 web
+dsh-daemon uninstall    # 卸载守护
 ```
 
-> 若包来自 git 且带 `prepare` 脚本，pnpm 会拦截构建并打印一个 key，按提示把它加到 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 下再重跑即可。本插件是纯 JS、无构建步骤，通常不会遇到。
+> 插件的界面代码在 dsh web 启动时载入内存，所以**装完/改完必须重启 web** 才会生效；只刷新页面不够。
 
-### 手动方式（适合本地开发，改代码即时生效）
+### 4. 不装守护、临时前台跑（三平台一致）
+
+```bash
+dsh web --port 3080 --no-open
+```
+
+⚠️ **不要写 `--host 0.0.0.0`** —— dsh 出于安全考虑会**主动拒绝**（它会把远程代码执行能力暴露到网络上），并提示改用 `127.0.0.1`。需要跨机访问请用 SSH 隧道或反向代理，并把来源加进 `--trusted-host`。
+
+### 平台差异一览
+
+| 平台 | 命令 | dsh 数据目录 | 守护落地 |
+|------|------|--------------|----------|
+| macOS | 全部同上 | `~/.dsh` | `~/Library/LaunchAgents/com.deepseek-ai.dsh-watchdog.plist` |
+| Linux | 全部同上 | `~/.dsh` | systemd user 服务（无 systemd 时退化为 cron） |
+| Windows | 全部同上（PowerShell / cmd 均可） | `%USERPROFILE%\.dsh` | 任务计划程序（VBS 启动脚本） |
+
+
+
+
+### 5. Docker 运行（可选，自建镜像）
+
+官方没有现成镜像，用 Node 官方镜像自建即可。
+
+⚠️ **容器里同样不能用 `--host 0.0.0.0`** —— dsh 会直接拒绝并退出（它会把远程代码执行能力暴露到网络上）。正确做法是：**让 dsh 只监听 `127.0.0.1`，再用 socat 把端口转到容器外**，最后由 `-p` 映射给宿主。
+
+`Dockerfile`：
+
+```dockerfile
+FROM node:22-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends socat \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm i -g @deepseek-ai/dsh
+EXPOSE 3080
+# 转发 0.0.0.0:3080 -> 127.0.0.1:13080（dsh 只肯监听回环地址）
+CMD ["bash","-lc","socat TCP-LISTEN:3080,fork,reuseaddr TCP:127.0.0.1:13080 & exec dsh web --port 13080 --no-open"]
+```
+
+构建并运行（三个平台一致）：
+
+```bash
+docker build -t dsh-web .
+docker run -d --name dsh-web -p 3080:3080 -v "$HOME/.dsh:/root/.dsh" dsh-web
+```
+
+Windows 的差别只在**挂载路径写法**：
+
+```powershell
+# PowerShell
+docker run -d --name dsh-web -p 3080:3080 -v "$env:USERPROFILE\.dsh:/root/.dsh" dsh-web
+```
+
+```bat
+REM cmd.exe
+docker run -d --name dsh-web -p 3080:3080 -v "%USERPROFILE%\.dsh:/root/.dsh" dsh-web
+```
+
+首次访问需要带认证的 URL（token 由 dsh 启动时打印）：
+
+```bash
+docker logs dsh-web 2>&1 | grep -o "http://[^ ]*token[^ ]*"
+```
+
+> Linux 上还可以直接用 `--network host`，省掉 socat（容器与宿主共用网络栈）；
+> Docker Desktop for macOS / Windows 需要先在设置里启用 host networking 才支持 `--network host`。
+> 想改端口就同时改 `-p`、`--port` 与 socat 里的两个端口号。
+
+## 手动安装（本地开发，改代码即时生效）
 
 ```bash
 git clone https://github.com/zzdhsxk/dsh-session-archiver.git ~/dsh_workspace/plugins/dsh-session-archiver
@@ -103,6 +184,8 @@ git clone https://github.com/zzdhsxk/dsh-session-archiver.git ~/dsh_workspace/pl
 cd ~/.dsh/profiles/web && pnpm install
 dsh-daemon restart
 ```
+
+> 若包来自 git 且带 `prepare` 脚本，pnpm 会拦截构建并打印一个 key，按提示把它加到 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds` 下再重跑即可。本插件是纯 JS、无构建步骤，通常不会遇到。
 
 ## HTTP API
 
