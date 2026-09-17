@@ -30,6 +30,8 @@ dsh 的会话文件（`session.v3.jsonl.zstd`）在打开/保存时，由**主�
 | 会话可读性 | 多数只显示 id / 时间 | ✅ 显示**标题**（读 dsh 投影缓存）、轮次、大小、工作区、相对时间、活跃状态 |
 | 跨工作区移动 | ✅ 支持 | ✅ 支持（并拒绝移动活跃会话）|
 | 面板可拖动 | ✗ | ✅ 按住标题栏拖动 |
+| 子会话识别 | 一般无 | ✅ 自动识别 dsh subagent 子会话、加标签并显示其名字 |
+| 超阈值自动维护 | 无 | ✅ 会话库超限时自动归档闲置会话、清理回收站（可选清理超龄归档）|
 
 > 说明：上表对比的是**归档语义与安全机制**上的常见差异，不针对任何具体实现——各插件侧重不同。本插件专注「安全地把会话移出/移回 + 不丢数据」。
 
@@ -38,8 +40,10 @@ dsh 的会话文件（`session.v3.jsonl.zstd`）在打开/保存时，由**主�
 - 侧栏底部 **「会话仓库」** 按钮 → 打开面板（可拖动）
 - **当前会话**列表：标题 / 大小 / 工作区 / 轮次 / 最近活动 / 是否活跃
 - 每行操作：**归档**、**移动**（下拉选目标工作区，含 `[新建]` 候选）、**回收站**
-- **已归档**列表：归档时间 + **恢复** / 删除
-- 顶部实时统计：当前会话数/体积、已归档数/体积、活跃阈值
+- **已归档**列表：归档时间 + **恢复** / 删除；自动归档的带绿色 `自动` 徽标
+- **子会话标签**：dsh 的 subagent 子会话（目录名无 `session-` 前缀 / 投影里 `subagent.identity` 有值）自动加紫色 `子会话` 徽标并显示其名字
+- **自动维护**：会话库超过阈值时自动归档最旧的闲置会话；到点清理回收站；可选清理超龄归档
+- 顶部实时统计：当前会话数/体积、**其中子会话数**、已归档数/体积、活跃阈值
 
 ## 安全保证（设计即防丢数据）
 
@@ -48,7 +52,23 @@ dsh 的会话文件（`session.v3.jsonl.zstd`）在打开/保存时，由**主�
 3. **sha256 台账**：`~/dsh-session-archive/manifest.json` 记录每个归档会话的文件清单与哈希
 4. **恢复前强制校验**：任一文件缺失或哈希不符 → 立即中止，绝不半途覆盖
 5. **删除默认进回收站**：`~/dsh-session-archive/.trash`；永久删除走独立接口
-6. **操作留痕**：`operations.log` 追加记录每一次归档/恢复/删除
+6. **操作留痕**：`operations.log` 追加记录每一次归档/恢复/删除（自动操作记为 `archive:auto` 等）
+7. **自动维护的边界**：候选**只会是「非活跃且闲置超过设定天数」的会话**；自动归档同样走 sha256 台账并在 manifest 里标记 `auto`；**归档区默认永不自动删除**（`archiveRetentionDays: 0`），必须显式设为正数才会清理
+
+## 自动维护（可选，默认关闭）
+
+在面板底部「自动维护设置」里配置（持久化到 `~/dsh-session-archive/config.json`）：
+
+| 配置项 | 默认 | 说明 |
+|--------|------|------|
+| `enabled` | `false` | 总开关，默认关闭 |
+| `libraryLimitMB` | 500 | 会话库超过该体积 → 自动归档最旧的非活跃会话，直到降至阈值的 90% |
+| `maxIdleDays` | 7 | **保护线**：只有闲置超过该天数的会话才会被自动归档 |
+| `trashRetentionDays` | 7 | 回收站超过该天数自动清理 |
+| `archiveRetentionDays` | **0** | 归档保留天数；**0 = 永不自动删除归档** |
+| `checkIntervalMinutes` | 60 | 检查间隔（最小 5 分钟）|
+
+面板上另有 **「立即执行一次」** 按钮可手工触发并查看结果；也可直接调 API。
 
 ## 安装
 
@@ -75,6 +95,9 @@ dsh-daemon restart
 |------|------|------|
 | GET  | `/session-archiver/api/list` | 会话 + 归档 + 工作区 + 统计 |
 | GET  | `/session-archiver/api/workspaces` | 可用工作区列表 |
+| GET  | `/session-archiver/api/config` | 读取自动维护配置 |
+| POST | `/session-archiver/api/config` | `{auto:{...}}` 保存自动维护配置 |
+| POST | `/session-archiver/api/maintain` | 立即执行一次自动维护 |
 | POST | `/session-archiver/api/archive` | `{sessionId, force?}` 归档 |
 | POST | `/session-archiver/api/restore` | `{sessionId}` 恢复（sha256 校验后）|
 | POST | `/session-archiver/api/move` | `{sessionId, targetWorkspace}` 移动 |
